@@ -1,20 +1,30 @@
 package com.example.aquatrack
 
+import android.annotation.SuppressLint
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
 import android.os.Bundle
+import android.widget.DatePicker
 import android.widget.RadioGroup
 import android.widget.Spinner
+import android.widget.TableLayout
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -24,6 +34,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -32,13 +43,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.navigation.NavDirections
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -46,6 +61,18 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.aquatrack.ui.theme.AquaTrackTheme
+import eu.wewox.lazytable.LazyTable
+import eu.wewox.lazytable.LazyTableItem
+import eu.wewox.lazytable.lazyTableDimensions
+import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.temporal.ChronoField
+import java.time.temporal.TemporalAccessor
+import java.time.temporal.TemporalField
+import java.util.Calendar
+import java.util.Date
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -66,7 +93,11 @@ class MainActivity : ComponentActivity() {
                         composable("createNewTank") { CreateNewTank(navController, tankList) }
                         composable("tankDetails/{tankname}", arguments =
                         listOf(navArgument("tankname") {type = NavType.StringType})) {
-                            ViewTankDetails(navController = navController, tank = getTankByName( tankList, it.arguments?.getString("tankname")))
+                            ViewTankDetails(navController, getTankByName( tankList, it.arguments?.getString("tankname")))
+                        }
+                        composable("recordMeasurement/{tankname}", arguments =
+                        listOf(navArgument("tankname") {type = NavType.StringType})) {
+                            RecordMeasurement(navController, getTankByName( tankList, it.arguments?.getString("tankname")))
                         }
                     }
                 }
@@ -85,7 +116,19 @@ class TankData(
     val width: Int?,
     val height: Int?,
     val gallons: Int,
-    val waterType: String
+    val waterType: String,
+    //waterRecords- date string pointing to maps of data
+    val waterRecords: MutableList<WaterRecord>
+)
+
+class WaterRecord(
+    var date: String,
+    var ammonia: Int?,
+    var nitrite: Int?,
+    var nitrate: Int?,
+    var ph: Int?,
+    var gh: Int?,
+    var kh: Int?
 )
 
 @Composable
@@ -131,6 +174,7 @@ fun CreateNewTank(navController: NavHostController, tankList: MutableList<TankDa
     var selectedWaterType by remember {
         mutableStateOf("Freshwater")
     }
+
     Column (
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -193,7 +237,8 @@ fun CreateNewTank(navController: NavHostController, tankList: MutableList<TankDa
                     width.toIntOrNull(),
                     height.toIntOrNull(),
                     gallons.toInt(),
-                    selectedWaterType
+                    selectedWaterType,
+                    mutableListOf() //an empty map to store future test results
                 )
             )
             navController.navigate("main")
@@ -208,7 +253,9 @@ fun ViewTankDetails(navController: NavHostController, tank: TankData?) {
     if( tank == null ) {
         Text("No tank specified.")
     } else {
-        Column {
+        Column (
+            modifier = Modifier.fillMaxWidth()
+                ){
             Text(tank.name, style = MaterialTheme.typography.headlineLarge)
             Text("Volume: ${tank.gallons}G", style=MaterialTheme.typography.headlineMedium)
             if (tank.length != null && tank.width != null && tank.height != null) {
@@ -220,8 +267,206 @@ fun ViewTankDetails(navController: NavHostController, tank: TankData?) {
                         .merge(TextStyle(fontStyle = FontStyle.Italic)))
             }
             Text(tank.waterType, style=MaterialTheme.typography.headlineMedium)
+
+
+            Text("Water Parameters", style=MaterialTheme.typography.headlineMedium)
+            val parameters = listOf(
+                "Ammonia", "Nitrate", "Nitrite", "pH", "gH", "kH"
+            )
+            Row {
+                parameters.forEach {
+                    Text("$it ")
+                }
+            }
+            tank.waterRecords.forEach {
+                Row() {
+                    Text("${it.date} ${it.ammonia} ${it.nitrite} ${it.nitrate} ${it.ph} " +
+                            "${it.gh} ${it.kh}")
+                }
+            }
+            Text(
+                "+ Record new parameters",
+                style = TextStyle(
+                    fontSize = 50.sp,
+                    color = Color.Blue,
+                    textDecoration = TextDecoration.Underline
+                ),
+                modifier = Modifier.clickable(
+                    true,
+                    onClick = { navController.navigate("recordMeasurement/${tank.name}") })
+            )
         }
     }
+}
+
+@SuppressLint("UnrememberedMutableState")
+@Composable
+fun RecordMeasurement(navController: NavHostController, tank: TankData?) {
+
+    if( tank == null ) {
+        Text("No tank specified.")
+        return
+    }
+
+    val parameters = listOf(
+        "Ammonia", "Nitrate", "Nitrite", "pH", "gH", "kH"
+    )
+
+
+    var nowChecked by remember {
+        mutableStateOf(false)
+    }
+
+    val tmp = mutableStateMapOf<String, Boolean>()
+    parameters.forEach {
+        tmp[it] = true
+    }
+
+    var takingMeasurementChecked = remember {
+        tmp
+    }
+
+    var waterRecord = remember {
+        mutableStateOf(WaterRecord("", 0, 0, 0, 0, 0, 0))
+    }
+
+    val localDate = LocalDateTime.now().atZone(ZoneId.systemDefault())
+    val hour = localDate.get(ChronoField.HOUR_OF_AMPM)
+    val minute = localDate.minute
+    val second = localDate.second
+    val amPm = if (localDate.get(ChronoField.AMPM_OF_DAY) == 0) "AM" else "PM"
+
+    val day = localDate.dayOfMonth
+    val month = localDate.monthValue
+    val year = localDate.year
+
+    var mTime by remember { mutableStateOf("${hour}:${minute}:${second} $amPm") }
+
+
+    var currentDate by remember {
+        mutableStateOf("${month}/${day}/${year}")
+    }
+
+    Column {
+        Text("Record water parameters")
+        Text("Time of measurement: ")
+
+        Column{
+            /*
+            Pick the time that the measurement was taken, defaulting to the current time.
+             */
+            var mTimePickerDialog: TimePickerDialog? = null
+            var datePickerDialog: DatePickerDialog? = null
+
+
+            //manual date and time entry
+            datePickerDialog = DatePickerDialog(
+                LocalContext.current,
+                { _: DatePicker, mYear: Int, mMonth: Int, mDayOfMonth: Int ->
+                    currentDate = "${mMonth}/${mDayOfMonth}/${mYear}"
+                }, year, month-1, day
+            )
+
+            mTimePickerDialog = TimePickerDialog(
+                LocalContext.current,
+                { _, mHour: Int, mMinute: Int ->
+                    mTime = "${mHour}:${mMinute}:${second} $amPm"
+                }, hour, minute, false
+            )
+
+            Row {
+                Button(onClick = { datePickerDialog.show() }) {
+                    Text("Pick date")
+                }
+
+                Text("Selected date: $currentDate")
+            }
+
+            Row {
+                Button(onClick = { mTimePickerDialog.show() }) {
+                    Text("Pick time")
+                }
+
+                Text("Selected time: $mTime")
+            }
+            
+            parameters.forEach {
+                Row(
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ){
+                    Text(it)
+                    val currentVal = when(it) {
+                        "Ammonia" -> waterRecord.value.ammonia
+                        "Nitrite" -> waterRecord.value.nitrite
+                        "Nitrate" -> waterRecord.value.nitrate
+                        "pH" -> waterRecord.value.ph
+                        "gH" -> waterRecord.value.gh
+                        "kH" -> waterRecord.value.kh
+
+                        else -> {null}
+                    }
+                    OutlinedTextField(
+                        value = currentVal.toString(),
+                        onValueChange = {param ->
+                            when(it) {
+                                "Ammonia" -> waterRecord.value.ammonia = param.toInt()
+                                "Nitrite" -> waterRecord.value.nitrite = param.toInt()
+                                "Nitrate" -> waterRecord.value.nitrate = param.toInt()
+                                "pH" -> waterRecord.value.ph = param.toInt()
+                                "gH" -> waterRecord.value.gh = param.toInt()
+                                "kH" -> waterRecord.value.kh = param.toInt()
+
+                                else -> {null}
+                            }
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
+
+                    takingMeasurementChecked[it]?.let { it1 ->
+                        Switch(checked = it1, onCheckedChange = { checked ->
+                            takingMeasurementChecked[it] = checked
+                            //if (!checked) parameterMap[it] = -1 else parameterMap[it] = parameterMap.getOrDefault(it, 0)
+                            when(it) {
+                                "Ammonia" -> if(!checked) waterRecord.value.ammonia = waterRecord.value.ammonia?.times(
+                                    -1
+                                )
+                                "Nitrite" -> if(!checked) waterRecord.value.nitrite = waterRecord.value.nitrite?.times(
+                                    -1
+                                )
+                                "Nitrate" -> if(!checked) waterRecord.value.nitrate = waterRecord.value.nitrate?.times(
+                                    -1
+                                )
+                                "pH" -> if(!checked) waterRecord.value.ph = waterRecord.value.ph?.times(
+                                    -1
+                                )
+                                "gH" -> if(!checked) waterRecord.value.gh = waterRecord.value.gh?.times(
+                                    -1
+                                )
+                                "kH" -> if(!checked) waterRecord.value.kh = waterRecord.value.ammonia?.times(
+                                    -1
+                                )
+
+                                else -> {null}
+                            }
+                        } )
+                    }
+                }
+            }
+        }
+        //add the measurements to the tank, with the date and time of measurement as a key
+        Button(onClick = {
+            tank.waterRecords.add(waterRecord.value)
+            navController.popBackStack()
+        }
+
+        ) {
+            Text("Submit new record")
+        }
+    }
+
+
+
+
 }
 
 fun calculateGallons(length: String?, width: String?, height: String?): Int {
